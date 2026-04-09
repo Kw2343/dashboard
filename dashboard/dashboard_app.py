@@ -1,7 +1,7 @@
 from __future__ import annotations
-
 from pathlib import Path
 from typing import Optional, Union
+from scatter_plot import load_scatter_data, create_scatter_plot
 
 import numpy as np
 import pandas as pd
@@ -17,9 +17,9 @@ st.set_page_config(
     layout="wide",
 )
 
-DEFAULT_PRODUCTS = "products_clean.csv"
-DEFAULT_REVIEWS = "reviews_clean_no_exact_duplicates.csv"
-DEFAULT_USERS = "user_summary.csv"
+DEFAULT_PRODUCTS = "data/products_clean.csv"
+DEFAULT_REVIEWS = "data/reviews_clean_no_exact_duplicates.csv"
+DEFAULT_USERS = "data/user_summary.csv"
 
 
 def reset_if_filelike(source):
@@ -501,211 +501,12 @@ st.caption(
 )
 
 with scatter_tab:
-    st.header("Recommendation XY Scatter Plot")
+    st.header("📊 Recommendation Scatter Plot")
 
-    st.caption(
-        "Hover over any Top 5, Near, or Far point to see the coordinate pair "
-        "in the format (MaxCosSim, Predicted_Rating). Random points are de-emphasized."
-    )
+    SCATTER_FILE = Path(__file__).parent / "data" / "recommender_scatterplot_inputs.xlsx"
 
-    search_user = st.text_input("Search by User ID")
+    df = load_scatter_data(SCATTER_FILE)
 
-    df_scatter = reviews.copy()
-
-
-    default_user = df_scatter["user_id"].iloc[0]
-    scatter_df = prepare_scatter_data(df_scatter, default_user)
-
-    if scatter_df.empty:
-        st.warning("No recommendations found for this user.")
-        st.stop()
-
-    # ---------- rename columns ----------
-    scatter_df = scatter_df.rename(columns={
-        "MaxCosine": "X_MaxCosSim",
-        "Predicted_Rating": "Y_PredRating"
-    })
-
-    # ---------- merge product names ----------
-    scatter_df = scatter_df.merge(
-        products_lookup[["parent_asin", "title"]],
-        left_on="DisplayLabel",
-        right_on="parent_asin",
-        how="left"
-    )
-
-    # ✅ FIXED INDENT (THIS WAS YOUR ERROR)
-    scatter_df["DisplayLabel"] = scatter_df["title"].fillna(scatter_df["DisplayLabel"])
-
-    # ---------- split groups ----------
-    top = scatter_df[scatter_df["Group"].isin(TOP_ORDER)]
-    near = scatter_df[scatter_df["Group"] == "Near"]
-    far = scatter_df[scatter_df["Group"] == "Far"]
-    random_pts = scatter_df[scatter_df["Group"] == "Random"]
-
-    # ---------- ensure order ----------
-    top["Group"] = pd.Categorical(top["Group"], categories=TOP_ORDER, ordered=True)
-    top = top.sort_values("Group").reset_index(drop=True)
-
-    fig = go.Figure()
-
-    # ---------- Random ----------
-    fig.add_trace(go.Scatter(
-        x=random_pts["X_MaxCosSim"],
-        y=random_pts["Y_PredRating"],
-        mode="markers",
-        name="Random",
-        marker=dict(size=7, color="rgba(0,255,255,0.4)"),
-        hoverinfo="skip"
-    ))
-
-    # ---------- Top 5 ----------
-    fig.add_trace(go.Scatter(
-        x=top["X_MaxCosSim"],
-        y=top["Y_PredRating"],
-        mode="lines+markers+text",
-        text=top["DisplayLabel"],
-        textposition="top center",
-        name="Top 5 path",
-        marker=dict(size=12, color="blue"),
-        line=dict(color="blue", width=3),
-        hovertemplate="(%{x:.2f}, %{y:.2f})<extra></extra>"
-    ))
-
-    # ---------- Near ----------
-    fig.add_trace(go.Scatter(
-        x=near["X_MaxCosSim"],
-        y=near["Y_PredRating"],
-        mode="markers+text",
-        text=near["DisplayLabel"],
-        textposition="top center",
-        name="Near",
-        marker=dict(size=12, color="green"),
-        hovertemplate="(%{x:.2f}, %{y:.2f})<extra></extra>"
-    ))
-
-    # ---------- Far ----------
-    with scatter_tab:
-     st.header("Recommendation XY Scatter Plot")
-
-     st.caption(
-        "Hover over any Top 5, Near, or Far point to see the coordinate pair "
-        "in the format (MaxCosSim, Predicted_Rating). Random points are de-emphasized."
-    )
-
-    df_scatter = reviews.copy()
-
-    # ---------- ALWAYS USE A VALID USER ----------
-    default_user = df_scatter["user_id"].iloc[0]
-
-    # ---------- GENERATE DATA ----------
-    def build_visual_scatter(df):
-        df = df.dropna(subset=["user_id", "parent_asin", "rating"])
-
-        sample = df.sample(min(200, len(df))).copy()
-
-        # Spread points nicely (THIS FIXES YOUR "LINE" ISSUE)
-        sample["X"] = np.random.beta(2, 2, len(sample))  # smooth distribution
-        sample["Y"] = sample["rating"] + np.random.normal(0, 0.25, len(sample))
-
-        sample["Label"] = sample["parent_asin"].astype(str)
-        sample["Group"] = "Random"
-
-        sample = sample.reset_index(drop=True)
-
-        # ---------- TOP 5 ----------
-        for i in range(min(5, len(sample))):
-            sample.loc[i, "Group"] = f"Top{i+1}"
-
-        # ---------- NEAR ----------
-        for i in range(5, min(10, len(sample))):
-            sample.loc[i, "Group"] = "Near"
-
-        # ---------- FAR ----------
-        for i in range(10, min(15, len(sample))):
-            sample.loc[i, "Group"] = "Far"
-
-        return sample
-
-    scatter_df = build_visual_scatter(df_scatter)
-
-    # ---------- MERGE PRODUCT NAMES ----------
-    scatter_df = scatter_df.merge(
-        products_lookup[["parent_asin", "title"]],
-        left_on="Label",
-        right_on="parent_asin",
-        how="left"
-    )
-
-    scatter_df["Label"] = scatter_df["title"].fillna(scatter_df["Label"])
-
-    # ---------- SPLIT GROUPS ----------
-    top = scatter_df[scatter_df["Group"].str.contains("Top")]
-    near = scatter_df[scatter_df["Group"] == "Near"]
-    far = scatter_df[scatter_df["Group"] == "Far"]
-    random_pts = scatter_df[scatter_df["Group"] == "Random"]
-
-    # Sort Top 5 properly
-    top["order"] = top["Group"].str.extract(r'(\d+)').astype(int)
-    top = top.sort_values("order")
-
-    # ---------- PLOT ----------
-    fig = go.Figure()
-
-    # Random (background)
-    fig.add_trace(go.Scatter(
-        x=random_pts["X"],
-        y=random_pts["Y"],
-        mode="markers",
-        name="Random",
-        marker=dict(size=6, color="rgba(0,150,255,0.25)"),
-        hoverinfo="skip"
-    ))
-
-    # Top 5 path (CONNECTED LINE)
-    fig.add_trace(go.Scatter(
-        x=top["X"],
-        y=top["Y"],
-        mode="lines+markers+text",
-        text=top["Label"],
-        textposition="top center",
-        name="Top 5",
-        marker=dict(size=12, color="blue"),
-        line=dict(color="blue", width=3),
-        hovertemplate="(%{x:.2f}, %{y:.2f})<extra></extra>"
-    ))
-
-    # Near
-    fig.add_trace(go.Scatter(
-        x=near["X"],
-        y=near["Y"],
-        mode="markers+text",
-        text=near["Label"],
-        textposition="top center",
-        name="Near",
-        marker=dict(size=11, color="green"),
-        hovertemplate="(%{x:.2f}, %{y:.2f})<extra></extra>"
-    ))
-
-    # Far
-    fig.add_trace(go.Scatter(
-        x=far["X"],
-        y=far["Y"],
-        mode="markers+text",
-        text=far["Label"],
-        textposition="top center",
-        name="Far",
-        marker=dict(size=11, color="red"),
-        hovertemplate="(%{x:.2f}, %{y:.2f})<extra></extra>"
-    ))
-
-    fig.update_layout(
-        title="XY Scatter Plot of Recommendation Candidates",
-        xaxis_title="MaxCosSim",
-        yaxis_title="Predicted Rating",
-        height=650,
-        plot_bgcolor="white",
-        legend=dict(x=0.01, y=0.99)
-    )
+    fig = create_scatter_plot(df)
 
     st.plotly_chart(fig, use_container_width=True)
