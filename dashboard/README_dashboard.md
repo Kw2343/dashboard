@@ -1,16 +1,22 @@
 # Interactive dashboard for the reviews / products / users CSVs
 
 ## Files
-- `dashboard_app.py`
-- `requirements_dashboard.txt`
 
-## Expected CSV names
-The app auto-loads these files if they are in the same folder as the app:
+### Python scripts
+
+- `dashboard_app.py` - Main Streamlit dashboard application
+- `scatter_plot.py` - Scatter plot visualization utility
+- `requirements_dashboard.txt` - Python dependencies
+
+### Data files
+
+The app expects CSV files to be located in the `data/` folder:
 - `products_clean.csv`
 - `reviews_clean_no_exact_duplicates.csv`
 - `user_summary.csv`
+- `asin_item.csv`
 
-If the CSVs are somewhere else, start the app and upload them from the sidebar.
+If the CSVs are in a different location, start the app and upload them from the sidebar.
 
 ## Run locally
 ```bash
