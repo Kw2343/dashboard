@@ -10,6 +10,8 @@ import plotly.graph_objects as go
 import streamlit as st
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
+from bought_tgt import show_bought_together_chart
+
 
 st.set_page_config(
     page_title="Health & Household Reviews Dashboard",
@@ -338,9 +340,12 @@ def prepare_scatter_data(df, target_user=None):
 
 
 # ---------- Tabs ----------
-overview_tab, products_tab, users_tab, scatter_tab = st.tabs(
-    ["Overview", "Products", "Users", "Scatter Plot"]
+overview_tab, products_tab, users_tab, scatter_tab, bought_together_tab = st.tabs(
+    ["Overview", "Products", "Users", "Scatter Plot", "Bought Together"]
 )
+
+with bought_together_tab:
+    show_bought_together_chart(products_lookup)
 
 with overview_tab:
     section_header("Dataset snapshot")
@@ -503,10 +508,40 @@ st.caption(
 with scatter_tab:
     st.header("📊 Recommendation Scatter Plot")
 
+    # ---------- LOAD DATA ----------
     SCATTER_FILE = Path(__file__).parent / "data" / "recommender_scatterplot_inputs.xlsx"
-
     df = load_scatter_data(SCATTER_FILE)
 
-    fig = create_scatter_plot(df)
+    # ---------- USER INPUT ----------
+    user_input = st.text_input("Search by User ID")
 
+    # ---------- DEFAULT VIEW (NO SEARCH) ----------
+    if user_input.strip() == "":
+        plot_df = df.copy()
+
+    # ---------- FILTERED VIEW (SEARCHED USER) ----------
+    else:
+        plot_df = df[df["User_ID"] == user_input].copy()
+
+        if plot_df.empty:
+            st.warning("No data found for this user.")
+            st.stop()
+
+        # ---------- SHOW TOP 5 TABLE ONLY AFTER SEARCH ----------
+        top = plot_df[plot_df["Group"].isin(TOP_ORDER)].copy()
+
+        if not top.empty:
+            st.subheader("Top 5 Product Recommendations")
+
+            top["order"] = top["Group"].map({g: i for i, g in enumerate(TOP_ORDER)})
+            top = top.sort_values("order")
+
+            st.dataframe(
+                top[["DisplayLabel", "MaxCosine", "Predicted_Rating"]],
+                use_container_width=True,
+                hide_index=True
+            )
+
+    # ---------- SCATTER ----------
+    fig = create_scatter_plot(plot_df)
     st.plotly_chart(fig, use_container_width=True)
