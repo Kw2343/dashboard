@@ -20,6 +20,7 @@ st.set_page_config(
 DEFAULT_PRODUCTS = "data/products_clean.csv"
 DEFAULT_REVIEWS = "data/reviews_clean_no_exact_duplicates.csv"
 DEFAULT_USERS = "data/user_summary.csv"
+DEFAULT_ASIN_ITEM = "data/asin_item.csv"
 
 
 def reset_if_filelike(source):
@@ -95,6 +96,13 @@ def load_users(source: Union[str, Path, bytes]) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def load_asin_item(source: Union[str, Path, bytes]) -> pd.DataFrame:
+    usecols = ["parent_asin", "Item", "title"]
+    source = reset_if_filelike(source)
+    return pd.read_csv(source, usecols=usecols).drop_duplicates(subset=["parent_asin"])
+
+
+@st.cache_data(show_spinner=False)
 def schema_preview(source: Union[str, Path, bytes], nrows: int = 5) -> pd.DataFrame:
     source = reset_if_filelike(source)
     return pd.read_csv(source, nrows=nrows)
@@ -165,10 +173,12 @@ st.write(
 reviews_upload = None
 products_upload = None
 users_upload = None
+asin_item_upload = None
 
 reviews_source = maybe_source(reviews_upload, DEFAULT_REVIEWS)
 products_source = maybe_source(products_upload, DEFAULT_PRODUCTS)
 users_source = maybe_source(users_upload, DEFAULT_USERS)
+asin_item_source = maybe_source(asin_item_upload, DEFAULT_ASIN_ITEM)
 
 missing = []
 if reviews_source is None:
@@ -187,7 +197,29 @@ with st.spinner("Loading CSV files..."):
     products = load_products(products_source)
     users = load_users(users_source)
 
+    # Load asin_item optionally
+    asin_item = None
+    if asin_item_source is not None:
+        try:
+            asin_item = load_asin_item(asin_item_source)
+        except Exception:
+            st.warning("Could not load asin_item.csv - product titles will use default values")
+
 products_lookup = products[["parent_asin", "title", "store_clean", "average_rating", "rating_number", "price"]].copy()
+
+# Merge with asin_item data if available
+if asin_item is not None:
+    products_lookup = products_lookup.merge(
+        asin_item[["parent_asin", "Item", "title"]].rename(columns={"title": "asin_item_title"}),
+        on="parent_asin",
+        how="left"
+    )
+    # Use Item as display title if available, fallback to original title
+    products_lookup["display_title"] = products_lookup["Item"].fillna(products_lookup["title"])
+    products_lookup["full_title_tooltip"] = products_lookup["asin_item_title"].fillna(products_lookup["title"])
+else:
+    products_lookup["display_title"] = products_lookup["title"]
+    products_lookup["full_title_tooltip"] = products_lookup["title"]
 
 with st.sidebar:
     years = sorted([int(y) for y in reviews["review_year"].dropna().unique() if int(y) > 0])
@@ -209,6 +241,7 @@ with st.sidebar:
     reviews_upload = st.file_uploader("Reviews CSV", type="csv", key="reviews")
     products_upload = st.file_uploader("Products CSV", type="csv", key="products")
     users_upload = st.file_uploader("Users CSV", type="csv", key="users")
+    asin_item_upload = st.file_uploader("ASIN Item CSV (optional)", type="csv", key="asin_item")
 
 filtered_reviews = reviews[
     reviews["review_year"].between(year_range[0], year_range[1])
@@ -416,15 +449,20 @@ with products_tab:
     )
 
     top_n = st.slider("Top products to show", 10, 100, 25, key="top_products_n")
+    chart_data = product_counts.head(top_n).sort_values("filtered_review_count").copy()
+    # Use display_title for cleaner chart labels
+    chart_data["chart_title"] = chart_data.get("display_title", chart_data["title"])
+
     fig = px.bar(
-        product_counts.head(top_n).sort_values("filtered_review_count"),
+        chart_data,
         x="filtered_review_count",
-        y="title",
+        y="chart_title",
         orientation="h",
-        hover_data=["parent_asin", "store_clean", "average_rating", "price"],
+        hover_data=["parent_asin", "store_clean", "average_rating", "price", "title"],
         title=f"Top {top_n} products by filtered review count",
     )
-    fig.update_layout(height=420)
+    fig.update_layout(height=420, yaxis_title="Product")
+    fig.update_yaxes(tickfont=dict(size=10))
     st.plotly_chart(fig, use_container_width=True)
 
     with st.container():
@@ -447,19 +485,53 @@ with products_tab:
     st.markdown("#### Search products")
     query = st.text_input("Search by product title or store")
     filtered_product_table = product_counts.copy()
+
+    # Filter out products with missing store or missing item
+    filtered_product_table = filtered_product_table[
+        (filtered_product_table["store_clean"].notna() & (filtered_product_table["store_clean"] != "(missing store)"))
+        & (filtered_product_table["display_title"].notna() & (filtered_product_table["display_title"] != ""))
+    ]
+
     if query.strip():
         q = query.strip().lower()
-        filtered_product_table = filtered_product_table[
-            filtered_product_table["title"].str.lower().str.contains(q, na=False)
-            | filtered_product_table["store_clean"].str.lower().str.contains(q, na=False)
-        ]
-    st.dataframe(
-        filtered_product_table[
-            ["parent_asin", "title", "store_clean", "filtered_review_count", "average_rating", "rating_number", "price"]
-        ].head(250),
-        use_container_width=True,
-        hide_index=True,
-    )
+        search_mask = (
+            (filtered_product_table["title"].fillna("").str.lower().str.contains(q, na=False))
+            | (filtered_product_table["store_clean"].fillna("").str.lower().str.contains(q, na=False))
+            | (filtered_product_table["display_title"].fillna("").str.lower().str.contains(q, na=False))
+        )
+        filtered_product_table = filtered_product_table[search_mask]
+
+    # Create display table with HTML tooltips
+    display_data = filtered_product_table.head(250).copy()
+
+    html_rows = []
+    for _, row in display_data.iterrows():
+        short_title = str(row["display_title"])[:50]
+        full_title = str(row["full_title_tooltip"]).replace('"', '&quot;').replace("'", "&#39;")
+        truncated = "..." if len(str(row["display_title"])) > 50 else ""
+
+        html_rows.append(
+            f'<tr><td>{row["parent_asin"]}</td><td><span title="{full_title}" style="cursor:help; text-decoration:underline dotted;">{short_title}{truncated}</span></td>'
+            f'<td>{row["store_clean"]}</td><td style="text-align:right">{int(row["filtered_review_count"])}</td>'
+            f'<td style="text-align:right">{row["average_rating"]:.2f}</td><td style="text-align:right">{int(row["rating_number"])}</td>'
+            f'<td style="text-align:right">${row["price"] if pd.notna(row["price"]) else "N/A"}</td></tr>'
+        )
+
+    table_html = f'''<table style="width:100%; border-collapse:collapse;">
+    <thead><tr style="background-color:#f0f0f0; border-bottom:2px solid #ddd;">
+    <th style="padding:8px; text-align:left">ASIN</th>
+    <th style="padding:8px; text-align:left">Product Title</th>
+    <th style="padding:8px; text-align:left">Store</th>
+    <th style="padding:8px; text-align:right">Reviews</th>
+    <th style="padding:8px; text-align:right">Rating</th>
+    <th style="padding:8px; text-align:right"># Ratings</th>
+    <th style="padding:8px; text-align:right">Price</th>
+    </tr></thead>
+    <tbody style="border-bottom:1px solid #eee;">
+    {"".join(html_rows)}
+    </tbody></table>'''
+
+    st.write(table_html, unsafe_allow_html=True)
 
 with users_tab:
     section_header("User concentration and behaviour")
