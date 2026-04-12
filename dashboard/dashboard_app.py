@@ -587,11 +587,11 @@ with scatter_tab:
     # ---------- USER INPUT ----------
     user_input = st.text_input("Search by User ID")
 
-    # ---------- DEFAULT VIEW (NO SEARCH) ----------
+    # ---------- NO SEARCH → SHOW NOTHING ----------
     if user_input.strip() == "":
-        plot_df = df.copy()
+        st.info("Enter a User ID to view recommendations and scatter plot.")
 
-    # ---------- FILTERED VIEW (SEARCHED USER) ----------
+    # ---------- SEARCHED USER ----------
     else:
         plot_df = df[df["User_ID"] == user_input].copy()
 
@@ -599,23 +599,24 @@ with scatter_tab:
             st.warning("No data found for this user.")
             st.stop()
 
-        # ---------- SHOW TOP 5 TABLE ONLY AFTER SEARCH ----------
+        # ---------- TOP 5 TABLE ----------
         top = plot_df[plot_df["Group"].isin(TOP_ORDER)].copy()
 
         if not top.empty:
-             st.subheader("Top 5 Product Recommendations")
+            st.subheader("Top 5 Product Recommendations")
 
-             top["order"] = top["Group"].map({
+            top["order"] = top["Group"].map({
                 "Top1": 1, "Top2": 2, "Top3": 3, "Top4": 4, "Top5": 5
-        })
-        top = top.sort_values("order")
+            })
 
-        st.dataframe(
-            top[["DisplayLabel", "MaxCosine", "Predicted_Rating"]],
-            use_container_width=True,
-            hide_index=True
-        )
+            top = top.sort_values("order")
 
-    # ---------- SCATTER ----------
-    fig = create_scatter_plot(plot_df)
-    st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(
+                top[["DisplayLabel", "MaxCosine", "Predicted_Rating"]],
+                use_container_width=True,
+                hide_index=True
+            )
+
+        # ---------- SCATTER (ONLY SHOW AFTER SEARCH) ----------
+        fig = create_scatter_plot(plot_df)
+        st.plotly_chart(fig, use_container_width=True)
