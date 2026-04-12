@@ -578,10 +578,10 @@ st.caption(
 )
 
 with scatter_tab:
-    st.header("📊 Recommendation Scatter Plot")
+    st.header("📊 Product Recommendation Scatter Plot")
 
     # ---------- LOAD DATA ----------
-    SCATTER_FILE = Path(__file__).parent / "data" / "recommender_scatterplot_inputs.xlsx"
+    SCATTER_FILE = Path(__file__).parent / "data" / "EShop_Product_Recommendations_Scatterplot_Inputs.xlsx"
     df = load_scatter_data(SCATTER_FILE)
 
     # ---------- USER INPUT ----------
@@ -603,16 +603,18 @@ with scatter_tab:
         top = plot_df[plot_df["Group"].isin(TOP_ORDER)].copy()
 
         if not top.empty:
-            st.subheader("Top 5 Product Recommendations")
+             st.subheader("Top 5 Product Recommendations")
 
-            top["order"] = top["Group"].map({g: i for i, g in enumerate(TOP_ORDER)})
-            top = top.sort_values("order")
+             top["order"] = top["Group"].map({
+                "Top1": 1, "Top2": 2, "Top3": 3, "Top4": 4, "Top5": 5
+        })
+        top = top.sort_values("order")
 
-            st.dataframe(
-                top[["DisplayLabel", "MaxCosine", "Predicted_Rating"]],
-                use_container_width=True,
-                hide_index=True
-            )
+        st.dataframe(
+            top[["DisplayLabel", "MaxCosine", "Predicted_Rating"]],
+            use_container_width=True,
+            hide_index=True
+        )
 
     # ---------- SCATTER ----------
     fig = create_scatter_plot(plot_df)
